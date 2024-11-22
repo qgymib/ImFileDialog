@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 
-namespace ImFileDialog {
+namespace ImFileDialog
+{
 
 /**
  * @brief String vector.
@@ -16,10 +17,12 @@ class FileDialog
 public:
     /**
      * @brief Constructor a file dialog.
-     * @param[in] title  The title of the dialog.
-     * @param[in] filter The filter of the dialog.
+     * @param[in] title  The title of the dialog. Encoding in UTF-8.
+     * @param[in] filters The filter list of the dialog, Encoding in UTF-8. The
+     *   filter must have syntax like: `NAME\nPATTERN1,PATTERN12`s.
+     * @param[in] filter_sz The size of the filter list.
      */
-    FileDialog(const char* title, const char* filter);
+    FileDialog(const char *title, const char *filters[], size_t filter_sz);
     virtual ~FileDialog();
 
 public:
@@ -31,23 +34,23 @@ public:
 
     /**
      * @brief Query the result of the dialog.
-     * @param[out] vec The result of the dialog.
+     * @param[out] vec The result of the paths, encoding in UTF-8.
      * @return True if success, false if not.
      */
-    bool GetResult(StringVec& vec) const;
+    bool GetResult(StringVec &vec) const;
 
-private:
+public:
     /**
      * @brief The implementation of the file dialog.
      * @{
      */
     struct Iner;
-    struct Iner* m_iner;
+    struct Iner *m_iner;
     /**
      * @}
      */
 };
 
-}
+} // namespace ImFileDialog
 
 #endif
