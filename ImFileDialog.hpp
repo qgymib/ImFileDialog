@@ -19,8 +19,7 @@ public:
      * @brief Constructor a file dialog.
      * @param[in] title  The title of the dialog. Encoding in UTF-8.
      * @param[in] filters The filter list of the dialog, Encoding in UTF-8. The
-     *   filter must have syntax like: `NAME\nPATTERN1,PATTERN12`s.
-     * @param[in] filter_sz The size of the filter list.
+     *   filter must have syntax like: `NAME\nPATTERN1,PATTERN12`.
      */
     FileDialog(const std::string &title, const std::string &filter);
     FileDialog(const std::string &title, const StringVec &filters);

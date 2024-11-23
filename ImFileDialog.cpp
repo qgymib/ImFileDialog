@@ -1,6 +1,10 @@
 #include <stdexcept>
 #include "ImFileDialog.hpp"
 
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
+#endif
+
 using namespace ImFileDialog;
 
 class PalFilter
@@ -105,12 +109,14 @@ PalFilter::Vec PalFilter::Parse(const StringVec &filters)
 #include <Windows.h>
 #include <shobjidl.h>
 #include <memory>
+#include <atlbase.h>
 
 /**
  * @brief Wide string.
  * @note Windows only.
  */
 typedef std::shared_ptr<WCHAR> wstring;
+typedef std::shared_ptr<IFileOpenDialog> FileOpenDialogPtr;
 
 enum FileDialogStatus
 {
@@ -142,6 +148,8 @@ struct FileDialog::Iner
     PalFilter::Vec filters; /**< File filter. */
 
     HANDLE thread; /**< Thread handle. */
+    DWORD             thread_id;
+    FileOpenDialogPtr pfd;
 
     CRITICAL_SECTION mutex;
     StringVec        result;
@@ -208,43 +216,6 @@ public:
     UINT              m_save_type_sz;
 };
 
-template <typename T>
-class PalWinObject
-{
-public:
-    PalWinObject()
-    {
-        obj = nullptr;
-    }
-    virtual ~PalWinObject()
-    {
-        reset();
-    }
-
-public:
-    void reset()
-    {
-        if (obj != nullptr)
-        {
-            obj->Release();
-            obj = nullptr;
-        }
-    }
-
-    T **operator&()
-    {
-        return &obj;
-    }
-
-    T *operator->()
-    {
-        return obj;
-    }
-
-private:
-    T *obj;
-};
-
 wstring FileDialog::Iner::utf8_to_wide(const std::string& str)
 {
     const char *src = str.c_str();
@@ -302,13 +273,13 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
 {
     FileDialog::Iner *iner = static_cast<FileDialog::Iner*>(lpThreadParameter);
 
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED | COINIT_DISABLE_OLE1DDE);
     if (!SUCCEEDED(hr))
     {
         throw std::runtime_error("CoInitializeEx failed");
     }
 
-    PalWinObject<IFileOpenDialog> pfd;
+    CComPtr<IFileOpenDialog> pfd = nullptr;
     hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
     if (!SUCCEEDED(hr))
     {
@@ -371,7 +342,7 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
         throw std::runtime_error("Show failed");
     }
 
-    PalWinObject<IShellItemArray> psiaResults;
+    CComPtr<IShellItemArray> psiaResults;
     hr = pfd->GetResults(&psiaResults);
     if (!SUCCEEDED(hr))
     {
@@ -388,7 +359,7 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
     StringVec result;
     for (DWORD i = 0; i < dwNumItems; i++)
     {
-        PalWinObject<IShellItem> psiResult;
+        CComPtr<IShellItem> psiResult;
         hr = psiaResults->GetItemAt(i, &psiResult);
         if (!SUCCEEDED(hr))
         {
@@ -426,15 +397,58 @@ FileDialog::Iner::Iner(const std::string &title, const StringVec &filters)
     status = FILEDIALOG_OPEN;
     InitializeCriticalSection(&mutex);
 
-    this->thread = CreateThread(nullptr, 0, _file_dialog_task, this, 0, nullptr);
+    this->thread = CreateThread(nullptr, 0, _file_dialog_task, this, 0, &thread_id);
     if (this->thread == nullptr)
     {
         throw std::runtime_error("CreateThread failed");
     }
 }
 
+struct EnumData
+{
+    DWORD dwThreadId;
+    HWND  hwndFound;
+};
+
+static BOOL CALLBACK EnumThreadWndProc(HWND hwnd, LPARAM lParam)
+{
+    EnumData *data = (EnumData*)lParam;
+    DWORD     dwThreadId = GetWindowThreadProcessId(hwnd, NULL);
+
+    if (data->dwThreadId != dwThreadId)
+    {
+        return TRUE;
+    }
+
+    /* Check if this window is a file dialog. */
+    wchar_t className[256];
+    if (!GetClassNameW(hwnd, className, ARRAY_SIZE(className)))
+    {
+        return TRUE;
+    }
+    if (wcscmp(className, L"#32770") != 0)
+    { /* Not a file dialog. */
+        return TRUE;
+    }
+
+    data->hwndFound = hwnd;
+    return FALSE;
+}
+
 FileDialog::Iner::~Iner()
 {
+    /* If dialog not closed, close it. */
+    {
+        EnumData data = { thread_id, NULL };
+        EnumWindows(EnumThreadWndProc, (LPARAM)&data);
+
+        if (data.hwndFound != NULL)
+        {
+            PostMessage(data.hwndFound, WM_CLOSE, 0, 0);
+        }
+    }
+
+    /* Wait for thread exit. */
     int ret = WaitForSingleObject(thread, INFINITE);
     if (ret != WAIT_OBJECT_0)
     {

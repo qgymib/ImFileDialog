@@ -1,3 +1,4 @@
+#include <Windows.h>
 #include <ImFileDialog.hpp>
 #include <iostream>
 
@@ -6,14 +7,13 @@ int main(int argc, char* argv[])
     (void)argc;
     (void)argv;
 
-    ImFileDialog::FileDialog dialog("", "All\n*.*");
-    while (!dialog.Query())
-    {
-    }
+    ImFileDialog::FileDialog *dialog = new ImFileDialog::FileDialog("", "All\n*.*");
 
-    ImFileDialog::StringVec result;
-    bool ret = dialog.GetResult(result);
-    std::cout << "ret:" << ret << std::endl;
+    std::cout << "sleep" << std::endl;
+    Sleep(3 * 1000);
+
+    std::cout << "delete" << std::endl;
+    delete dialog;
 
     return 0;
 }
