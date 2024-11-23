@@ -279,7 +279,7 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
 {
     OpenDialog::Iner *iner = static_cast<OpenDialog::Iner *>(lpThreadParameter);
 
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED | COINIT_DISABLE_OLE1DDE);
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (!SUCCEEDED(hr))
     {
         throw std::runtime_error("CoInitializeEx failed");
@@ -396,6 +396,8 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
     return 0;
 }
 
+#include <iostream>
+
 OpenDialog::Iner::Iner(const std::string &title, const StringVec &filters)
 {
     this->title = title;
@@ -408,6 +410,9 @@ OpenDialog::Iner::Iner(const std::string &title, const StringVec &filters)
     {
         throw std::runtime_error("CreateThread failed");
     }
+
+    DWORD ctid = GetCurrentThreadId();
+    std::cout << "tid:" << thread_id << ",ctid:" << ctid << std::endl;
 }
 
 static BOOL CALLBACK EnumThreadWndProc(HWND hwnd, LPARAM lParam)

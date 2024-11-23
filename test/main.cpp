@@ -10,7 +10,7 @@ int main(int argc, char* argv[])
     ImFileDialog::OpenDialog *dialog = new ImFileDialog::OpenDialog("", "All\n*.*");
 
     std::cout << "sleep" << std::endl;
-    Sleep(3 * 1000);
+    Sleep(1 * 1000);
 
     std::cout << "delete" << std::endl;
     delete dialog;
