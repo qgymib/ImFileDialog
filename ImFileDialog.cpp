@@ -121,7 +121,7 @@ enum FileDialogStatus
 
 struct FileDialog::Iner
 {
-    Iner(const char *title, const StringVec &filters);
+    Iner(const std::string &title, const StringVec &filters);
     ~Iner();
 
     /**
@@ -419,7 +419,7 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
     return 0;
 }
 
-FileDialog::Iner::Iner(const char *title, const StringVec &filters)
+FileDialog::Iner::Iner(const std::string &title, const StringVec &filters)
 {
     this->title = title;
     this->filters = PalFilter::Parse(filters);
@@ -446,8 +446,15 @@ FileDialog::Iner::~Iner()
     DeleteCriticalSection(&mutex);
 }
 
-FileDialog::FileDialog(const char *title, const StringVec &filters)
+FileDialog::FileDialog(const std::string &title, const StringVec &filters)
 {
+    m_iner = new Iner(title, filters);
+}
+
+FileDialog::FileDialog(const std::string &title, const std::string &filter)
+{
+    StringVec filters;
+    filters.push_back(filter);
     m_iner = new Iner(title, filters);
 }
 

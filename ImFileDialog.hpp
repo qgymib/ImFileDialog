@@ -22,7 +22,8 @@ public:
      *   filter must have syntax like: `NAME\nPATTERN1,PATTERN12`s.
      * @param[in] filter_sz The size of the filter list.
      */
-    FileDialog(const char *title, const StringVec& filters);
+    FileDialog(const std::string &title, const std::string &filter);
+    FileDialog(const std::string &title, const StringVec &filters);
     virtual ~FileDialog();
 
 public:
