@@ -1,6 +1,7 @@
+#include <stdexcept>
 #include "ImFileDialog.hpp"
 
-typedef ImFileDialog::StringVec StringVec;
+using namespace ImFileDialog;
 
 class PalFilter
 {
@@ -21,7 +22,7 @@ public:
      * @param[in] filter_sz The size of the filter list.
      * @return The parsed filter list.
      */
-    static Vec Parse(const char *filters[], size_t filter_sz);
+    static Vec Parse(const StringVec& filters);
 
 public:
     std::string name;     /**< Name of the filter. */
@@ -84,57 +85,407 @@ PalFilter PalFilter::Parse(const std::string &filter)
     return result;
 }
 
-PalFilter::Vec PalFilter::Parse(const char *filters[], size_t filter_sz)
+PalFilter::Vec PalFilter::Parse(const StringVec &filters)
 {
     PalFilter::Vec result;
-    for (size_t i = 0; i < filter_sz; i++)
+
+    StringVec::const_iterator it = filters.begin();
+    for (; it != filters.end(); it++)
     {
-        result.push_back(PalFilter::Parse(filters[i]));
+        result.push_back(PalFilter::Parse(*it));
     }
     return result;
 }
 
 #if defined(_WIN32)
 
-struct ImFileDialog::FileDialog::Iner
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
+#include <Windows.h>
+#include <shobjidl.h>
+#include <memory>
+
+/**
+ * @brief Wide string.
+ * @note Windows only.
+ */
+typedef std::shared_ptr<WCHAR> wstring;
+
+enum FileDialogStatus
 {
-    Iner(const char *title, const char *filter);
-    ~Iner();
-
-    std::string title;  /**< Window title. */
-    std::string filter; /**< File filter. */
-
-    HANDLE thread; /**< Thread handle. */
+    FILEDIALOG_OPEN,
+    FILEDIALOG_OK,
+    FILEDIALOG_CANCEL,
 };
 
-static DWORD CALLBACK _file_dialog_thread_win32(LPVOID lpThreadParameter)
+struct FileDialog::Iner
 {
+    Iner(const char *title, const StringVec &filters);
+    ~Iner();
+
+    /**
+     * @brief Convert UTF-8 string into Unicode string.
+     * @param[in] str   UTF-8 string.
+     * @return Unicode string.
+     */
+    static wstring utf8_to_wide(const std::string& str);
+
+    /**
+     * @brief Convert Unicode string into UTF-8 string.
+     * @param[in] str   Unicode string.
+     * @return UTF-8 string.
+     */
+    static std::string wide_to_utf8(const WCHAR *str);
+
+    std::string title;  /**< Window title. */
+    PalFilter::Vec filters; /**< File filter. */
+
+    HANDLE thread; /**< Thread handle. */
+
+    CRITICAL_SECTION mutex;
+    StringVec        result;
+    FileDialogStatus status;
+};
+
+class comdlg_filterspec
+{
+public:
+    comdlg_filterspec()
+    {
+        m_save_types = NULL;
+        m_save_type_sz = 0;
+    }
+
+    virtual ~comdlg_filterspec()
+    {
+        for (size_t i = 0; i < m_save_type_sz; i++)
+        {
+            free((void *)m_save_types[i].pszName);
+            free((void *)m_save_types[i].pszSpec);
+        }
+        free(m_save_types);
+    }
+
+public:
+    void append(const PalFilter& filter)
+    {
+        std::string str;
+        for (size_t i = 0; i < filter.patterns.size(); i++)
+        {
+            const std::string &item = filter.patterns[i];
+            if (i != 0)
+            {
+                str.append(";");
+            }
+            str.append(item);
+        }
+
+        size_t new_sz = sizeof(COMDLG_FILTERSPEC) * (m_save_type_sz + 1);
+        COMDLG_FILTERSPEC* new_save_types = (COMDLG_FILTERSPEC *)realloc(m_save_types, new_sz);
+        if (new_save_types == nullptr)
+        {
+            throw std::runtime_error("Out of memory");
+        }
+        m_save_types = new_save_types;
+
+        m_save_types[m_save_type_sz].pszName = _wcsdup(FileDialog::Iner::utf8_to_wide(filter.name).get());
+        m_save_types[m_save_type_sz].pszSpec = _wcsdup(FileDialog::Iner::utf8_to_wide(str).get());
+        m_save_type_sz++;
+    }
+
+    void append(const PalFilter::Vec& filters)
+    {
+        PalFilter::Vec::const_iterator it = filters.begin();
+        for (; it != filters.end(); it++)
+        {
+            append(*it);
+        }
+    }
+
+public:
+    COMDLG_FILTERSPEC *m_save_types;
+    UINT              m_save_type_sz;
+};
+
+template <typename T>
+class PalWinObject
+{
+public:
+    PalWinObject()
+    {
+        obj = nullptr;
+    }
+    virtual ~PalWinObject()
+    {
+        reset();
+    }
+
+public:
+    void reset()
+    {
+        if (obj != nullptr)
+        {
+            obj->Release();
+            obj = nullptr;
+        }
+    }
+
+    T **operator&()
+    {
+        return &obj;
+    }
+
+    T *operator->()
+    {
+        return obj;
+    }
+
+private:
+    T *obj;
+};
+
+wstring FileDialog::Iner::utf8_to_wide(const std::string& str)
+{
+    const char *src = str.c_str();
+    int pathw_len = MultiByteToWideChar(CP_UTF8, 0, src, -1, NULL, 0);
+    if (pathw_len == 0)
+    {
+        return NULL;
+    }
+
+    size_t buf_sz = pathw_len * sizeof(WCHAR);
+    WCHAR *buf = (WCHAR *)malloc(buf_sz);
+    if (buf == NULL)
+    {
+        return NULL;
+    }
+
+    int r = MultiByteToWideChar(CP_UTF8, 0, src, -1, buf, pathw_len);
+    if (r != pathw_len)
+    {
+        abort();
+    }
+
+    return wstring(buf, free);
 }
 
-ImFileDialog::FileDialog::Iner::Iner(const char *title, const char *filter)
+std::string FileDialog::Iner::wide_to_utf8(const WCHAR* str)
+{
+    std::string ret;
+
+    int target_len = WideCharToMultiByte(CP_UTF8, 0, str, -1, NULL, 0, NULL, NULL);
+    if (target_len == 0)
+    {
+        return ret;
+    }
+
+    char *buf = (char *)malloc(target_len);
+    if (buf == NULL)
+    {
+        return ret;
+    }
+
+    int r = WideCharToMultiByte(CP_UTF8, 0, str, -1, buf, target_len, NULL, NULL);
+    if (r != target_len)
+    {
+        abort();
+    }
+
+    ret = buf;
+    free(buf);
+
+    return ret;
+}
+
+static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
+{
+    FileDialog::Iner *iner = static_cast<FileDialog::Iner*>(lpThreadParameter);
+
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (!SUCCEEDED(hr))
+    {
+        throw std::runtime_error("CoInitializeEx failed");
+    }
+
+    PalWinObject<IFileOpenDialog> pfd;
+    hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+    if (!SUCCEEDED(hr))
+    {
+        throw std::runtime_error("CoCreateInstance failed");
+    }
+
+    DWORD dwFlags = 0;
+    hr = pfd->GetOptions(&dwFlags);
+    if (!SUCCEEDED(hr))
+    {
+        throw std::runtime_error("GetOptions failed");
+    }
+
+    hr = pfd->SetOptions(dwFlags | FOS_FORCEFILESYSTEM | FOS_ALLOWMULTISELECT);
+    if (!SUCCEEDED(hr))
+    {
+        throw std::runtime_error("SetOptions failed");
+    }
+
+    if (!iner->title.empty())
+    {
+        wstring title = FileDialog::Iner::utf8_to_wide(iner->title);
+        hr = pfd->SetTitle(title.get());
+        if (!SUCCEEDED(hr))
+        {
+            throw std::runtime_error("SetTitle failed");
+        }
+    }
+
+    comdlg_filterspec spec;
+    spec.append(iner->filters);
+    hr = pfd->SetFileTypes(spec.m_save_type_sz, spec.m_save_types);
+    if (!SUCCEEDED(hr))
+    {
+        throw std::runtime_error("SetFileTypes failed");
+    }
+
+    hr = pfd->SetFileTypeIndex(1);
+    if (!SUCCEEDED(hr))
+    {
+        throw std::runtime_error("SetFileTypeIndex failed");
+    }
+
+    /*
+     * This is a blocking operation.
+     */
+    hr = pfd->Show(nullptr);
+
+    /* The user closed the window by cancelling the operation. */
+    if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+    {
+        EnterCriticalSection(&iner->mutex);
+        iner->status = FILEDIALOG_CANCEL;
+        LeaveCriticalSection(&iner->mutex);
+        return 0;
+    }
+
+    if (!SUCCEEDED(hr))
+    {
+        throw std::runtime_error("Show failed");
+    }
+
+    PalWinObject<IShellItemArray> psiaResults;
+    hr = pfd->GetResults(&psiaResults);
+    if (!SUCCEEDED(hr))
+    {
+        throw std::runtime_error("GetResults failed");
+    }
+
+    DWORD dwNumItems = 0;
+    hr = psiaResults->GetCount(&dwNumItems);
+    if (!SUCCEEDED(hr))
+    {
+        throw std::runtime_error("GetCount failed");
+    }
+
+    StringVec result;
+    for (DWORD i = 0; i < dwNumItems; i++)
+    {
+        PalWinObject<IShellItem> psiResult;
+        hr = psiaResults->GetItemAt(i, &psiResult);
+        if (!SUCCEEDED(hr))
+        {
+            throw std::runtime_error("GetItemAt failed");
+        }
+
+        PWSTR pszFilePath = NULL;
+        hr = psiResult->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+        if (!SUCCEEDED(hr))
+        {
+            throw std::runtime_error("GetDisplayName failed");
+        }
+
+        std::string path = FileDialog::Iner::wide_to_utf8(pszFilePath);
+        CoTaskMemFree(pszFilePath);
+
+        result.push_back(path);
+    }
+
+    EnterCriticalSection(&iner->mutex);
+    {
+        iner->status = FILEDIALOG_OK;
+        iner->result = result;
+    }
+    LeaveCriticalSection(&iner->mutex);
+
+    CoUninitialize();
+    return 0;
+}
+
+FileDialog::Iner::Iner(const char *title, const StringVec &filters)
 {
     this->title = title;
-    this->filter = filter;
+    this->filters = PalFilter::Parse(filters);
+    status = FILEDIALOG_OPEN;
+    InitializeCriticalSection(&mutex);
 
-    this->thread = CreateThread(NULL, 0, _file_dialog_thread_win32, this, 0, NULL);
-    if (this->thread == NULL)
+    this->thread = CreateThread(nullptr, 0, _file_dialog_task, this, 0, nullptr);
+    if (this->thread == nullptr)
     {
         throw std::runtime_error("CreateThread failed");
     }
 }
 
-ImFileDialog::FileDialog::Iner::~Iner()
+FileDialog::Iner::~Iner()
 {
+    int ret = WaitForSingleObject(thread, INFINITE);
+    if (ret != WAIT_OBJECT_0)
+    {
+        abort();
+    }
+    CloseHandle(thread);
+    thread = nullptr;
+
+    DeleteCriticalSection(&mutex);
 }
 
-ImFileDialog::FileDialog::FileDialog(const char *title, const char *filter)
+FileDialog::FileDialog(const char *title, const StringVec &filters)
 {
-    m_iner = new Iner(title, filter);
+    m_iner = new Iner(title, filters);
 }
 
-ImFileDialog::FileDialog::~FileDialog()
+FileDialog::~FileDialog()
 {
     delete m_iner;
+}
+
+bool FileDialog::Query()
+{
+    FileDialogStatus ret;
+    EnterCriticalSection(&m_iner->mutex);
+    {
+        ret = m_iner->status;
+    }
+    LeaveCriticalSection(&m_iner->mutex);
+
+    return ret != FILEDIALOG_OPEN;
+}
+
+bool FileDialog::GetResult(StringVec& vec) const
+{
+    bool ret;
+    EnterCriticalSection(&m_iner->mutex);
+    do
+    {
+        if (m_iner->status != FILEDIALOG_OK)
+        {
+            ret = false;
+            break;
+        }
+
+        vec = m_iner->result;
+        ret = true;
+    } while (false);
+    LeaveCriticalSection(&m_iner->mutex);
+
+    return ret;
 }
 
 #else
