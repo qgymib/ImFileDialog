@@ -7,7 +7,7 @@ int main(int argc, char* argv[])
     (void)argc;
     (void)argv;
 
-    ImFileDialog::FileDialog *dialog = new ImFileDialog::FileDialog("", "All\n*.*");
+    ImFileDialog::OpenDialog *dialog = new ImFileDialog::OpenDialog("", "All\n*.*");
 
     std::cout << "sleep" << std::endl;
     Sleep(3 * 1000);

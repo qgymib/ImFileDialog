@@ -12,7 +12,7 @@ namespace ImFileDialog
  */
 typedef std::vector<std::string> StringVec;
 
-class FileDialog
+class OpenDialog
 {
 public:
     /**
@@ -21,9 +21,9 @@ public:
      * @param[in] filters The filter list of the dialog, Encoding in UTF-8. The
      *   filter must have syntax like: `NAME\nPATTERN1,PATTERN12`.
      */
-    FileDialog(const std::string &title, const std::string &filter);
-    FileDialog(const std::string &title, const StringVec &filters);
-    virtual ~FileDialog();
+    OpenDialog(const std::string &title, const std::string &filter);
+    OpenDialog(const std::string &title, const StringVec &filters);
+    virtual ~OpenDialog();
 
 public:
     /**

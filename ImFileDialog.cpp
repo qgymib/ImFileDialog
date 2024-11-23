@@ -116,107 +116,57 @@ PalFilter::Vec PalFilter::Parse(const StringVec &filters)
  * @note Windows only.
  */
 typedef std::shared_ptr<WCHAR> wstring;
-typedef std::shared_ptr<IFileOpenDialog> FileOpenDialogPtr;
 
-enum FileDialogStatus
+enum OpenDialogStatus
 {
-    FILEDIALOG_OPEN,
-    FILEDIALOG_OK,
-    FILEDIALOG_CANCEL,
+    OPENDIALOG_OPEN,
+    OPENDIALOG_OK,
+    OPENDIALOG_CANCEL,
 };
 
-struct FileDialog::Iner
+struct EnumData
+{
+    DWORD dwThreadId;
+    HWND  hwndFound;
+};
+
+struct OpenDialog::Iner
 {
     Iner(const std::string &title, const StringVec &filters);
     ~Iner();
-
-    /**
-     * @brief Convert UTF-8 string into Unicode string.
-     * @param[in] str   UTF-8 string.
-     * @return Unicode string.
-     */
-    static wstring utf8_to_wide(const std::string& str);
-
-    /**
-     * @brief Convert Unicode string into UTF-8 string.
-     * @param[in] str   Unicode string.
-     * @return UTF-8 string.
-     */
-    static std::string wide_to_utf8(const WCHAR *str);
 
     std::string title;  /**< Window title. */
     PalFilter::Vec filters; /**< File filter. */
 
     HANDLE thread; /**< Thread handle. */
     DWORD             thread_id;
-    FileOpenDialogPtr pfd;
 
     CRITICAL_SECTION mutex;
     StringVec        result;
-    FileDialogStatus status;
+    OpenDialogStatus status;
 };
 
 class comdlg_filterspec
 {
 public:
-    comdlg_filterspec()
-    {
-        m_save_types = NULL;
-        m_save_type_sz = 0;
-    }
-
-    virtual ~comdlg_filterspec()
-    {
-        for (size_t i = 0; i < m_save_type_sz; i++)
-        {
-            free((void *)m_save_types[i].pszName);
-            free((void *)m_save_types[i].pszSpec);
-        }
-        free(m_save_types);
-    }
+    comdlg_filterspec();
+    virtual ~comdlg_filterspec();
 
 public:
-    void append(const PalFilter& filter)
-    {
-        std::string str;
-        for (size_t i = 0; i < filter.patterns.size(); i++)
-        {
-            const std::string &item = filter.patterns[i];
-            if (i != 0)
-            {
-                str.append(";");
-            }
-            str.append(item);
-        }
-
-        size_t new_sz = sizeof(COMDLG_FILTERSPEC) * (m_save_type_sz + 1);
-        COMDLG_FILTERSPEC* new_save_types = (COMDLG_FILTERSPEC *)realloc(m_save_types, new_sz);
-        if (new_save_types == nullptr)
-        {
-            throw std::runtime_error("Out of memory");
-        }
-        m_save_types = new_save_types;
-
-        m_save_types[m_save_type_sz].pszName = _wcsdup(FileDialog::Iner::utf8_to_wide(filter.name).get());
-        m_save_types[m_save_type_sz].pszSpec = _wcsdup(FileDialog::Iner::utf8_to_wide(str).get());
-        m_save_type_sz++;
-    }
-
-    void append(const PalFilter::Vec& filters)
-    {
-        PalFilter::Vec::const_iterator it = filters.begin();
-        for (; it != filters.end(); it++)
-        {
-            append(*it);
-        }
-    }
+    void append(const PalFilter &filter);
+    void append(const PalFilter::Vec &filters);
 
 public:
     COMDLG_FILTERSPEC *m_save_types;
     UINT              m_save_type_sz;
 };
 
-wstring FileDialog::Iner::utf8_to_wide(const std::string& str)
+/**
+ * @brief Convert UTF-8 string into Unicode string.
+ * @param[in] str   UTF-8 string.
+ * @return Unicode string.
+ */
+static wstring utf8_to_wide(const std::string &str)
 {
     const char *src = str.c_str();
     int pathw_len = MultiByteToWideChar(CP_UTF8, 0, src, -1, NULL, 0);
@@ -241,7 +191,12 @@ wstring FileDialog::Iner::utf8_to_wide(const std::string& str)
     return wstring(buf, free);
 }
 
-std::string FileDialog::Iner::wide_to_utf8(const WCHAR* str)
+/**
+ * @brief Convert Unicode string into UTF-8 string.
+ * @param[in] str   Unicode string.
+ * @return UTF-8 string.
+ */
+std::string wide_to_utf8(const WCHAR *str)
 {
     std::string ret;
 
@@ -269,9 +224,60 @@ std::string FileDialog::Iner::wide_to_utf8(const WCHAR* str)
     return ret;
 }
 
+comdlg_filterspec::comdlg_filterspec()
+{
+    m_save_types = NULL;
+    m_save_type_sz = 0;
+}
+
+comdlg_filterspec::~comdlg_filterspec()
+{
+    for (size_t i = 0; i < m_save_type_sz; i++)
+    {
+        free((void *)m_save_types[i].pszName);
+        free((void *)m_save_types[i].pszSpec);
+    }
+    free(m_save_types);
+}
+
+void comdlg_filterspec::append(const PalFilter& filter)
+{
+    std::string str;
+    for (size_t i = 0; i < filter.patterns.size(); i++)
+    {
+        const std::string &item = filter.patterns[i];
+        if (i != 0)
+        {
+            str.append(";");
+        }
+        str.append(item);
+    }
+
+    size_t             new_sz = sizeof(COMDLG_FILTERSPEC) * (m_save_type_sz + 1);
+    COMDLG_FILTERSPEC *new_save_types = (COMDLG_FILTERSPEC *)realloc(m_save_types, new_sz);
+    if (new_save_types == nullptr)
+    {
+        throw std::runtime_error("Out of memory");
+    }
+    m_save_types = new_save_types;
+
+    m_save_types[m_save_type_sz].pszName = _wcsdup(utf8_to_wide(filter.name).get());
+    m_save_types[m_save_type_sz].pszSpec = _wcsdup(utf8_to_wide(str).get());
+    m_save_type_sz++;
+}
+
+void comdlg_filterspec::append(const PalFilter::Vec &filters)
+{
+    PalFilter::Vec::const_iterator it = filters.begin();
+    for (; it != filters.end(); it++)
+    {
+        append(*it);
+    }
+}
+
 static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
 {
-    FileDialog::Iner *iner = static_cast<FileDialog::Iner*>(lpThreadParameter);
+    OpenDialog::Iner *iner = static_cast<OpenDialog::Iner *>(lpThreadParameter);
 
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED | COINIT_DISABLE_OLE1DDE);
     if (!SUCCEEDED(hr))
@@ -301,7 +307,7 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
 
     if (!iner->title.empty())
     {
-        wstring title = FileDialog::Iner::utf8_to_wide(iner->title);
+        wstring title = utf8_to_wide(iner->title);
         hr = pfd->SetTitle(title.get());
         if (!SUCCEEDED(hr))
         {
@@ -332,7 +338,7 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
     if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED))
     {
         EnterCriticalSection(&iner->mutex);
-        iner->status = FILEDIALOG_CANCEL;
+        iner->status = OPENDIALOG_CANCEL;
         LeaveCriticalSection(&iner->mutex);
         return 0;
     }
@@ -373,7 +379,7 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
             throw std::runtime_error("GetDisplayName failed");
         }
 
-        std::string path = FileDialog::Iner::wide_to_utf8(pszFilePath);
+        std::string path = wide_to_utf8(pszFilePath);
         CoTaskMemFree(pszFilePath);
 
         result.push_back(path);
@@ -381,7 +387,7 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
 
     EnterCriticalSection(&iner->mutex);
     {
-        iner->status = FILEDIALOG_OK;
+        iner->status = OPENDIALOG_OK;
         iner->result = result;
     }
     LeaveCriticalSection(&iner->mutex);
@@ -390,11 +396,11 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
     return 0;
 }
 
-FileDialog::Iner::Iner(const std::string &title, const StringVec &filters)
+OpenDialog::Iner::Iner(const std::string &title, const StringVec &filters)
 {
     this->title = title;
     this->filters = PalFilter::Parse(filters);
-    status = FILEDIALOG_OPEN;
+    status = OPENDIALOG_OPEN;
     InitializeCriticalSection(&mutex);
 
     this->thread = CreateThread(nullptr, 0, _file_dialog_task, this, 0, &thread_id);
@@ -403,12 +409,6 @@ FileDialog::Iner::Iner(const std::string &title, const StringVec &filters)
         throw std::runtime_error("CreateThread failed");
     }
 }
-
-struct EnumData
-{
-    DWORD dwThreadId;
-    HWND  hwndFound;
-};
 
 static BOOL CALLBACK EnumThreadWndProc(HWND hwnd, LPARAM lParam)
 {
@@ -435,7 +435,7 @@ static BOOL CALLBACK EnumThreadWndProc(HWND hwnd, LPARAM lParam)
     return FALSE;
 }
 
-FileDialog::Iner::~Iner()
+OpenDialog::Iner::~Iner()
 {
     /* If dialog not closed, close it. */
     {
@@ -460,42 +460,42 @@ FileDialog::Iner::~Iner()
     DeleteCriticalSection(&mutex);
 }
 
-FileDialog::FileDialog(const std::string &title, const StringVec &filters)
+OpenDialog::OpenDialog(const std::string &title, const StringVec &filters)
 {
     m_iner = new Iner(title, filters);
 }
 
-FileDialog::FileDialog(const std::string &title, const std::string &filter)
+OpenDialog::OpenDialog(const std::string &title, const std::string &filter)
 {
     StringVec filters;
     filters.push_back(filter);
     m_iner = new Iner(title, filters);
 }
 
-FileDialog::~FileDialog()
+OpenDialog::~OpenDialog()
 {
     delete m_iner;
 }
 
-bool FileDialog::Query()
+bool OpenDialog::Query()
 {
-    FileDialogStatus ret;
+    OpenDialogStatus ret;
     EnterCriticalSection(&m_iner->mutex);
     {
         ret = m_iner->status;
     }
     LeaveCriticalSection(&m_iner->mutex);
 
-    return ret != FILEDIALOG_OPEN;
+    return ret != OPENDIALOG_OPEN;
 }
 
-bool FileDialog::GetResult(StringVec& vec) const
+bool OpenDialog::GetResult(StringVec &vec) const
 {
     bool ret;
     EnterCriticalSection(&m_iner->mutex);
     do
     {
-        if (m_iner->status != FILEDIALOG_OK)
+        if (m_iner->status != OPENDIALOG_OK)
         {
             ret = false;
             break;
