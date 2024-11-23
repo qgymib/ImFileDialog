@@ -17,12 +17,18 @@ class OpenDialog
 public:
     /**
      * @brief Constructor a file dialog.
-     * @param[in] title  The title of the dialog. Encoding in UTF-8.
-     * @param[in] filters The filter list of the dialog, Encoding in UTF-8. The
-     *   filter must have syntax like: `NAME\nPATTERN1,PATTERN12`.
+     * @param[in] filter The filter list of the dialog, Encoding in UTF-8. The
+     *   filter must have syntax like: `NAME:PATTERN1,PATTERN12\nNAME:PATTERN3`.
      */
-    OpenDialog(const std::string &title, const std::string &filter);
-    OpenDialog(const std::string &title, const StringVec &filters);
+    OpenDialog(const char *filter);
+
+    /**
+     * @brief Constructor a file dialog.
+     * @param[in] title  The title of the dialog. Encoding in UTF-8.
+     * @param[in] filter The filter list of the dialog, Encoding in UTF-8. 
+     */
+    OpenDialog(const char* title, const char* filter);
+    
     virtual ~OpenDialog();
 
 public:

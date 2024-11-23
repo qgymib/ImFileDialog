@@ -75,7 +75,7 @@ static StringVec StringSplit(const std::string &orig, const std::string &delimit
 PalFilter PalFilter::Parse(const std::string &filter)
 {
     PalFilter   result;
-    std::size_t pos = filter.find('\n');
+    std::size_t pos = filter.find(':');
     if (pos == std::string::npos)
     {
         return result;
@@ -132,7 +132,7 @@ struct EnumData
 
 struct OpenDialog::Iner
 {
-    Iner(const std::string &title, const StringVec &filters);
+    Iner(const std::string &title, const std::string &filter);
     ~Iner();
 
     std::string title;  /**< Window title. */
@@ -396,12 +396,12 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
     return 0;
 }
 
-#include <iostream>
-
-OpenDialog::Iner::Iner(const std::string &title, const StringVec &filters)
+OpenDialog::Iner::Iner(const std::string &title, const std::string &filter)
 {
+    StringVec filter_vec = StringSplit(filter, "\n");
+
     this->title = title;
-    this->filters = PalFilter::Parse(filters);
+    this->filters = PalFilter::Parse(filter_vec);
     status = OPENDIALOG_OPEN;
     InitializeCriticalSection(&mutex);
 
@@ -410,9 +410,6 @@ OpenDialog::Iner::Iner(const std::string &title, const StringVec &filters)
     {
         throw std::runtime_error("CreateThread failed");
     }
-
-    DWORD ctid = GetCurrentThreadId();
-    std::cout << "tid:" << thread_id << ",ctid:" << ctid << std::endl;
 }
 
 static BOOL CALLBACK EnumThreadWndProc(HWND hwnd, LPARAM lParam)
@@ -465,16 +462,14 @@ OpenDialog::Iner::~Iner()
     DeleteCriticalSection(&mutex);
 }
 
-OpenDialog::OpenDialog(const std::string &title, const StringVec &filters)
+OpenDialog::OpenDialog(const char *filter)
 {
-    m_iner = new Iner(title, filters);
+    m_iner = new Iner("", filter);
 }
 
-OpenDialog::OpenDialog(const std::string &title, const std::string &filter)
+OpenDialog::OpenDialog(const char* title, const char* filter)
 {
-    StringVec filters;
-    filters.push_back(filter);
-    m_iner = new Iner(title, filters);
+    m_iner = new Iner(title, filter);
 }
 
 OpenDialog::~OpenDialog()
