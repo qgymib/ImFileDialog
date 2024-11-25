@@ -26,7 +26,7 @@ public:
      * @param[in] filter_sz The size of the filter list.
      * @return The parsed filter list.
      */
-    static Vec Parse(const StringVec& filters);
+    static Vec Parse(const StringVec &filters);
 
 public:
     std::string name;     /**< Name of the filter. */
@@ -135,11 +135,11 @@ struct OpenDialog::Iner
     Iner(const std::string &title, const std::string &filter);
     ~Iner();
 
-    std::string title;  /**< Window title. */
+    std::string    title;   /**< Window title. */
     PalFilter::Vec filters; /**< File filter. */
 
     HANDLE thread; /**< Thread handle. */
-    DWORD             thread_id;
+    DWORD  thread_id;
 
     CRITICAL_SECTION mutex;
     StringVec        result;
@@ -158,7 +158,7 @@ public:
 
 public:
     COMDLG_FILTERSPEC *m_save_types;
-    UINT              m_save_type_sz;
+    UINT               m_save_type_sz;
 };
 
 /**
@@ -169,7 +169,7 @@ public:
 static wstring utf8_to_wide(const std::string &str)
 {
     const char *src = str.c_str();
-    int pathw_len = MultiByteToWideChar(CP_UTF8, 0, src, -1, NULL, 0);
+    int         pathw_len = MultiByteToWideChar(CP_UTF8, 0, src, -1, NULL, 0);
     if (pathw_len == 0)
     {
         return NULL;
@@ -240,7 +240,7 @@ comdlg_filterspec::~comdlg_filterspec()
     free(m_save_types);
 }
 
-void comdlg_filterspec::append(const PalFilter& filter)
+void comdlg_filterspec::append(const PalFilter &filter)
 {
     std::string str;
     for (size_t i = 0; i < filter.patterns.size(); i++)
@@ -414,7 +414,7 @@ OpenDialog::Iner::Iner(const std::string &title, const std::string &filter)
 
 static BOOL CALLBACK EnumThreadWndProc(HWND hwnd, LPARAM lParam)
 {
-    EnumData *data = (EnumData*)lParam;
+    EnumData *data = (EnumData *)lParam;
     DWORD     dwThreadId = GetWindowThreadProcessId(hwnd, NULL);
 
     if (data->dwThreadId != dwThreadId)
@@ -467,7 +467,7 @@ OpenDialog::OpenDialog(const char *filter)
     m_iner = new Iner("", filter);
 }
 
-OpenDialog::OpenDialog(const char* title, const char* filter)
+OpenDialog::OpenDialog(const char *title, const char *filter)
 {
     m_iner = new Iner(title, filter);
 }
@@ -517,9 +517,9 @@ bool OpenDialog::GetResult(StringVec &vec) const
 
 typedef std::shared_ptr<StringVec> StringVecPtr;
 
-struct ImFileDialog::FileDialog::Iner
+struct OpenDialog::Iner
 {
-    Iner(const char *title, const char *filters[], size_t filter_sz);
+    Iner(const std::string &title, const std::string &filter);
     ~Iner();
 
     std::string    title;     /**< Window title. */
@@ -569,8 +569,8 @@ static std::string _build_zenity_filter(const PalFilter::Vec &filters)
 
 static void *_file_dialog_zenity_thread(void *data)
 {
-    ImFileDialog::FileDialog::Iner *iner = static_cast<ImFileDialog::FileDialog::Iner *>(data);
-    FILE                           *cmd = popen(iner->zenity_cmd.c_str(), "r");
+    OpenDialog::Iner *iner = static_cast<OpenDialog::Iner *>(data);
+    FILE             *cmd = popen(iner->zenity_cmd.c_str(), "r");
     if (cmd == nullptr)
     {
         iner->draw_mode = true;
@@ -600,7 +600,7 @@ static void *_file_dialog_zenity_thread(void *data)
     return nullptr;
 }
 
-static void _file_dialog_run_zenity(ImFileDialog::FileDialog::Iner *iner)
+static void _file_dialog_run_zenity(OpenDialog::Iner *iner)
 {
     iner->thread = (pthread_t *)malloc(sizeof(pthread_t));
     int ret = pthread_create(iner->thread, nullptr, _file_dialog_zenity_thread, iner);
@@ -612,10 +612,12 @@ static void _file_dialog_run_zenity(ImFileDialog::FileDialog::Iner *iner)
     }
 }
 
-ImFileDialog::FileDialog::Iner::Iner(const char *title, const char *filters[], size_t filter_sz)
+OpenDialog::Iner::Iner(const std::string &title, const std::string &filter)
 {
+    StringVec filter_vec = StringSplit(filter, "\n");
+
     this->title = title;
-    this->filters = PalFilter::Parse(filters, filter_sz);
+    this->filters = PalFilter::Parse(filter_vec);
     this->thread = nullptr;
     this->draw_mode = false;
 
@@ -627,7 +629,7 @@ ImFileDialog::FileDialog::Iner::Iner(const char *title, const char *filters[], s
     }
 }
 
-ImFileDialog::FileDialog::Iner::~Iner()
+OpenDialog::Iner::~Iner()
 {
     if (thread != nullptr)
     {
@@ -640,23 +642,28 @@ ImFileDialog::FileDialog::Iner::~Iner()
     }
 }
 
-ImFileDialog::FileDialog::FileDialog(const char *title, const char *filters[], size_t filter_sz)
+OpenDialog::OpenDialog(const char *filter)
 {
-    m_iner = new Iner(title, filters, filter_sz);
+    m_iner = new Iner("", filter);
 }
 
-ImFileDialog::FileDialog::~FileDialog()
+OpenDialog::OpenDialog(const char *title, const char *filter)
+{
+    m_iner = new Iner(title, filter);
+}
+
+OpenDialog::~OpenDialog()
 {
     delete m_iner;
 }
 
-static bool _dialog_query_draw(ImFileDialog::FileDialog::Iner *iner)
+static bool _dialog_query_draw(OpenDialog::Iner *iner)
 {
     (void)iner;
     return false;
 }
 
-static bool _dialog_query_thread(ImFileDialog::FileDialog::Iner *iner)
+static bool _dialog_query_thread(OpenDialog::Iner *iner)
 {
     if (iner->thread == nullptr)
     {
@@ -674,7 +681,7 @@ static bool _dialog_query_thread(ImFileDialog::FileDialog::Iner *iner)
     return false;
 }
 
-bool ImFileDialog::FileDialog::Query(void)
+bool OpenDialog::Query(void)
 {
     if (m_iner->draw_mode)
     {
@@ -684,7 +691,7 @@ bool ImFileDialog::FileDialog::Query(void)
     return _dialog_query_thread(m_iner);
 }
 
-bool ImFileDialog::FileDialog::GetResult(StringVec &vec) const
+bool OpenDialog::GetResult(StringVec &vec) const
 {
     StringVecPtr reuslt = m_iner->result;
     if (reuslt == nullptr)
