@@ -132,11 +132,12 @@ struct EnumData
 
 struct OpenDialog::Iner
 {
-    Iner(const std::string &title, const std::string &filter);
+    Iner(const std::string &title, const std::string &filter, unsigned flags);
     ~Iner();
 
     std::string    title;   /**< Window title. */
     PalFilter::Vec filters; /**< File filter. */
+    unsigned       flags;
 
     HANDLE thread; /**< Thread handle. */
     DWORD  thread_id;
@@ -275,10 +276,29 @@ void comdlg_filterspec::append(const PalFilter::Vec &filters)
     }
 }
 
+static DWORD _file_dialog_get_options(OpenDialog::Iner *iner, DWORD flags)
+{
+    if (iner->flags & OpenDialog::PICK_FOLDERS)
+    {
+        flags |= FOS_PICKFOLDERS;
+    }
+    else
+    {
+        flags |= FOS_FORCEFILESYSTEM;
+    }
+    if (iner->flags & OpenDialog::ALLOW_MULTISELECT)
+    {
+        flags |= FOS_ALLOWMULTISELECT;
+    }
+
+    return flags;
+}
+
 static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
 {
     OpenDialog::Iner *iner = static_cast<OpenDialog::Iner *>(lpThreadParameter);
 
+    /* Require `COINIT_APARTMENTTHREADED` so the #EnumWindows() will work. */
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (!SUCCEEDED(hr))
     {
@@ -299,7 +319,8 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
         throw std::runtime_error("GetOptions failed");
     }
 
-    hr = pfd->SetOptions(dwFlags | FOS_FORCEFILESYSTEM | FOS_ALLOWMULTISELECT);
+    dwFlags = _file_dialog_get_options(iner, dwFlags);
+    hr = pfd->SetOptions(dwFlags);
     if (!SUCCEEDED(hr))
     {
         throw std::runtime_error("SetOptions failed");
@@ -396,12 +417,13 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
     return 0;
 }
 
-OpenDialog::Iner::Iner(const std::string &title, const std::string &filter)
+OpenDialog::Iner::Iner(const std::string &title, const std::string &filter, unsigned flags)
 {
     StringVec filter_vec = StringSplit(filter, "\n");
 
     this->title = title;
     this->filters = PalFilter::Parse(filter_vec);
+    this->flags = flags;
     status = OPENDIALOG_OPEN;
     InitializeCriticalSection(&mutex);
 
@@ -462,14 +484,14 @@ OpenDialog::Iner::~Iner()
     DeleteCriticalSection(&mutex);
 }
 
-OpenDialog::OpenDialog(const char *filter)
+OpenDialog::OpenDialog(const char *filter, unsigned flags)
 {
-    m_iner = new Iner("", filter);
+    m_iner = new Iner("", filter, flags);
 }
 
-OpenDialog::OpenDialog(const char *title, const char *filter)
+OpenDialog::OpenDialog(const char *title, const char *filter, unsigned flags)
 {
-    m_iner = new Iner(title, filter);
+    m_iner = new Iner(title, filter, flags);
 }
 
 OpenDialog::~OpenDialog()
