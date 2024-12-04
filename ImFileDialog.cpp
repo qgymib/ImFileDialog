@@ -7,6 +7,16 @@
 
 using namespace ImFileDialog;
 
+class OpenDialog::Iner
+{
+public:
+    virtual ~Iner() {}
+
+public:
+    virtual bool Query(void) = 0;
+    virtual bool GetResult(StringVec &vec) const = 0;
+};
+
 class PalFilter
 {
 public:
@@ -33,6 +43,12 @@ public:
     StringVec   patterns; /**< File patterns. */
 };
 
+/**
+ * @brief Split a string into multiple strings by given delimiter.
+ * @param[in] orig Source string.
+ * @param[in] delimiter Delimiter string.
+ * @return Vector of strings that is split from #orig.
+ */
 static StringVec StringSplit(const std::string &orig, const std::string &delimiter)
 {
     StringVec vetStr;
@@ -132,12 +148,12 @@ struct EnumData
 
 struct OpenDialog::Iner
 {
-    Iner(const std::string &title, const std::string &filter, unsigned flags);
+    Iner(const std::string &title, const std::string &filter, int flags);
     ~Iner();
 
     std::string    title;   /**< Window title. */
     PalFilter::Vec filters; /**< File filter. */
-    unsigned       flags;
+    int            flags;
 
     HANDLE thread; /**< Thread handle. */
     DWORD  thread_id;
@@ -417,7 +433,7 @@ static DWORD CALLBACK _file_dialog_task(LPVOID lpThreadParameter)
     return 0;
 }
 
-OpenDialog::Iner::Iner(const std::string &title, const std::string &filter, unsigned flags)
+OpenDialog::Iner::Iner(const std::string &title, const std::string &filter, int flags)
 {
     StringVec filter_vec = StringSplit(filter, "\n");
 
@@ -484,12 +500,12 @@ OpenDialog::Iner::~Iner()
     DeleteCriticalSection(&mutex);
 }
 
-OpenDialog::OpenDialog(const char *filter, unsigned flags)
+OpenDialog::OpenDialog(const char *filter, int flags)
 {
     m_iner = new Iner("", filter, flags);
 }
 
-OpenDialog::OpenDialog(const char *title, const char *filter, unsigned flags)
+OpenDialog::OpenDialog(const char *title, const char *filter, int flags)
 {
     m_iner = new Iner(title, filter, flags);
 }
@@ -539,13 +555,20 @@ bool OpenDialog::GetResult(StringVec &vec) const
 
 typedef std::shared_ptr<StringVec> StringVecPtr;
 
-struct OpenDialog::Iner
+class ZenityOpenDialog : public OpenDialog::Iner
 {
-    Iner(const std::string &title, const std::string &filter);
-    ~Iner();
+public:
+    ZenityOpenDialog(const std::string &title, const std::string &filter, int flags);
+    virtual ~ZenityOpenDialog();
 
+public:
+    virtual bool Query(void);
+    virtual bool GetResult(StringVec &vec) const;
+
+public:
     std::string    title;     /**< Window title. */
     PalFilter::Vec filters;   /**< File filters. */
+    int            flags;
     bool           draw_mode; /**< Draw mode. */
 
     pthread_t   *thread; /**< Thread handle. */
@@ -591,7 +614,7 @@ static std::string _build_zenity_filter(const PalFilter::Vec &filters)
 
 static void *_file_dialog_zenity_thread(void *data)
 {
-    OpenDialog::Iner *iner = static_cast<OpenDialog::Iner *>(data);
+    ZenityOpenDialog *iner = static_cast<ZenityOpenDialog *>(data);
     FILE             *cmd = popen(iner->zenity_cmd.c_str(), "r");
     if (cmd == nullptr)
     {
@@ -622,7 +645,7 @@ static void *_file_dialog_zenity_thread(void *data)
     return nullptr;
 }
 
-static void _file_dialog_run_zenity(OpenDialog::Iner *iner)
+static void _file_dialog_run_zenity(ZenityOpenDialog *iner)
 {
     iner->thread = (pthread_t *)malloc(sizeof(pthread_t));
     int ret = pthread_create(iner->thread, nullptr, _file_dialog_zenity_thread, iner);
@@ -634,58 +657,13 @@ static void _file_dialog_run_zenity(OpenDialog::Iner *iner)
     }
 }
 
-OpenDialog::Iner::Iner(const std::string &title, const std::string &filter)
-{
-    StringVec filter_vec = StringSplit(filter, "\n");
-
-    this->title = title;
-    this->filters = PalFilter::Parse(filter_vec);
-    this->thread = nullptr;
-    this->draw_mode = false;
-
-    if (s_is_zenity_available)
-    {
-        zenity_cmd = "zenity --file-selection --multiple --title=\"" + this->title + "\" --file-filter=\"" +
-                     _build_zenity_filter(this->filters) + "\"";
-        _file_dialog_run_zenity(this);
-    }
-}
-
-OpenDialog::Iner::~Iner()
-{
-    if (thread != nullptr)
-    {
-        if (pthread_join(*thread, nullptr) != 0)
-        {
-            abort();
-        }
-        free(thread);
-        thread = nullptr;
-    }
-}
-
-OpenDialog::OpenDialog(const char *filter)
-{
-    m_iner = new Iner("", filter);
-}
-
-OpenDialog::OpenDialog(const char *title, const char *filter)
-{
-    m_iner = new Iner(title, filter);
-}
-
-OpenDialog::~OpenDialog()
-{
-    delete m_iner;
-}
-
 static bool _dialog_query_draw(OpenDialog::Iner *iner)
 {
     (void)iner;
     return false;
 }
 
-static bool _dialog_query_thread(OpenDialog::Iner *iner)
+static bool _dialog_query_thread(ZenityOpenDialog *iner)
 {
     if (iner->thread == nullptr)
     {
@@ -703,19 +681,57 @@ static bool _dialog_query_thread(OpenDialog::Iner *iner)
     return false;
 }
 
-bool OpenDialog::Query(void)
+ZenityOpenDialog::ZenityOpenDialog(const std::string &title, const std::string &filter, int flags)
 {
-    if (m_iner->draw_mode)
-    {
-        return _dialog_query_draw(m_iner);
-    }
+    StringVec filter_vec = StringSplit(filter, "\n");
 
-    return _dialog_query_thread(m_iner);
+    this->title = title;
+    this->filters = PalFilter::Parse(filter_vec);
+    this->flags = flags;
+    this->thread = nullptr;
+    this->draw_mode = false;
+
+    if (s_is_zenity_available)
+    {
+        zenity_cmd = "zenity --file-selection --title=\"" + this->title + "\"";
+        if (flags & OpenDialog::PICK_FOLDERS)
+        {
+            zenity_cmd += " --directory";
+        }
+        else if (flags & OpenDialog::ALLOW_MULTISELECT)
+        {
+            zenity_cmd += " --multiple";
+        }
+        zenity_cmd += " --file-filter=\"" + _build_zenity_filter(this->filters) + "\"";
+        _file_dialog_run_zenity(this);
+    }
 }
 
-bool OpenDialog::GetResult(StringVec &vec) const
+ZenityOpenDialog::~ZenityOpenDialog()
 {
-    StringVecPtr reuslt = m_iner->result;
+    if (thread != nullptr)
+    {
+        if (pthread_join(*thread, nullptr) != 0)
+        {
+            abort();
+        }
+        free(thread);
+        thread = nullptr;
+    }
+}
+
+bool ZenityOpenDialog::Query()
+{
+    if (draw_mode)
+    {
+        return _dialog_query_draw(this);
+    }
+    return _dialog_query_thread(this);
+}
+
+bool ZenityOpenDialog::GetResult(StringVec &vec) const
+{
+    StringVecPtr reuslt = this->result;
     if (reuslt == nullptr)
     {
         return false;
@@ -723,6 +739,31 @@ bool OpenDialog::GetResult(StringVec &vec) const
 
     vec = *reuslt;
     return true;
+}
+
+OpenDialog::OpenDialog(const char *filter, int flags)
+{
+    m_iner = new ZenityOpenDialog("", filter, flags);
+}
+
+OpenDialog::OpenDialog(const char *title, const char *filter, int flags)
+{
+    m_iner = new ZenityOpenDialog(title, filter, flags);
+}
+
+OpenDialog::~OpenDialog()
+{
+    delete m_iner;
+}
+
+bool OpenDialog::Query(void)
+{
+    return m_iner->Query();
+}
+
+bool OpenDialog::GetResult(StringVec &vec) const
+{
+    return m_iner->GetResult(vec);
 }
 
 #endif

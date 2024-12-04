@@ -40,7 +40,7 @@ public:
      *   filter must have syntax like: `NAME:PATTERN1,PATTERN12\nNAME:PATTERN3`.
      * @param[in] flags Options. See #OpenDialog::Option.
      */
-    OpenDialog(const char *filter, unsigned flags = 0);
+    OpenDialog(const char *filter, int flags = 0);
 
     /**
      * @brief Constructor a file dialog.
@@ -48,7 +48,7 @@ public:
      * @param[in] filter The filter list of the dialog, Encoding in UTF-8. 
      * @param[in] flags Options. See #OpenDialog::Option.
      */
-    OpenDialog(const char* title, const char* filter, unsigned flags = 0);
+    OpenDialog(const char* title, const char* filter, int flags = 0);
 
     /**
      * @brief Destructor.
@@ -74,8 +74,8 @@ public:
      * @brief The implementation of the file dialog.
      * @{
      */
-    struct Iner;
-    struct Iner *m_iner;
+    class Iner;
+    class Iner *m_iner;
     /**
      * @}
      */
